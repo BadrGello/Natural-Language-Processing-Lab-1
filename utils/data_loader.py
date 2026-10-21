@@ -2,11 +2,15 @@
 
 Both classification notebooks MUST call load_emotion_splits(SEED), rather than
 creating their own splits, to avoid incomparable evaluations.
+
+Local parquet file (data/part_2_data.parquet) is tried first so the lab works
+fully offline.  The HuggingFace ``datasets`` library is used as a fallback.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -16,6 +20,9 @@ EMOTION_DATASET_ID = "avsolatorio/mteb-emotion-avs_triplets"
 SHAKESPEARE_TRAIN_IDS = ("shakespeare-caesar.txt", "shakespeare-macbeth.txt")
 SHAKESPEARE_EVAL_ID = "shakespeare-hamlet.txt"
 DEFAULT_SEED = 42
+
+# Path to the pre-downloaded local parquet file (relative to repo root).
+_LOCAL_PARQUET = Path(__file__).parent.parent / "data" / "part_2_data.parquet"
 
 
 @dataclass(frozen=True)
@@ -105,23 +112,38 @@ def split_labeled_texts(
 
 
 def load_emotion_splits(*, seed: int = DEFAULT_SEED) -> EmotionSplits:
-    """Load Hugging Face Emotion dataset and create common 80/10/10 splits.
+    """Load the emotion dataset and create the shared 80/10/10 splits.
 
-    Original dataset has one 'train' split of 16,000 labeled sentences.
-    'query_idx', 'positive_idx', and 'negative_idx' are not text-classification
-    inputs; deliberately ignore them to prevent unintended leakage.
-    Requires network access on first run; datasets caches future loads.
+    Loading order:
+    1. Local ``data/part_2_data.parquet`` — works fully offline.
+    2. HuggingFace ``datasets`` library — used only if the parquet is absent.
+
+    Columns used: ``text``, ``label``, ``label_text``.
+    Triplet columns (``query_idx``, ``positive_idx``, ``negative_idx``) are
+    intentionally ignored to prevent unintended leakage.
     """
-    from datasets import load_dataset  # lazily imported to keep helper tests light
-
-    rows = load_dataset(EMOTION_DATASET_ID, split="train")
-    required = {"text", "label", "label_text"}
-    if not required.issubset(rows.column_names):
-        raise ValueError(f"Dataset is missing required columns: {required - set(rows.column_names)}")
-
-    texts = rows["text"]
-    labels = rows["label"]
-    names = rows["label_text"]
+    if _LOCAL_PARQUET.exists():
+        import pandas as pd  # lazily imported
+        df = pd.read_parquet(_LOCAL_PARQUET)
+        required = {"text", "label", "label_text"}
+        if not required.issubset(df.columns):
+            raise ValueError(
+                f"Local parquet is missing columns: {required - set(df.columns)}"
+            )
+        texts = df["text"].tolist()
+        labels = df["label"].tolist()
+        names = df["label_text"].tolist()
+    else:
+        from datasets import load_dataset  # lazily imported
+        rows = load_dataset(EMOTION_DATASET_ID, split="train")
+        required = {"text", "label", "label_text"}
+        if not required.issubset(rows.column_names):
+            raise ValueError(
+                f"Dataset is missing required columns: {required - set(rows.column_names)}"
+            )
+        texts = rows["text"]
+        labels = rows["label"]
+        names = rows["label_text"]
 
     label_mapping: dict[int, str] = {}
     for label, name in zip(labels, names):

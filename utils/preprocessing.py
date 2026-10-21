@@ -7,15 +7,22 @@ are fair. Do not remove stopwords by default: useful signal may be lost.
 from __future__ import annotations
 
 import re
+import unicodedata
 
-_WORD_PATTERN = re.compile(r"[a-z0-9]+")
-
+_WORD_PATTERN = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 
 def tokenize(text: str) -> list[str]:
-    """Lowercase English text, remove punctuation, and return word tokens."""
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    return _WORD_PATTERN.findall(text.lower())
+
+    # Normalize Unicode characters
+    text = unicodedata.normalize("NFKC", text)
+
+    # Normalize case and apostrophes
+    text = text.casefold().replace("’", "'")
+
+    # Extract words
+    return _WORD_PATTERN.findall(text)
 
 
 def normalize_text(text: str) -> str:
